@@ -28,6 +28,8 @@ pragma solidity 0.7.0;
 
 //  The burnAmount is the amount of EQUUSGovernanceToken tokens that they for want to burn.
 
+// To simulate this token on a testnet deploy ERC1820Registry, and a TEST UniswapV2 Token to set the constructor to recognise and interact the token in the code
+
 
 
 
