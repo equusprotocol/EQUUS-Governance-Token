@@ -12,19 +12,34 @@ pragma solidity 0.7.0;
 //              ##
 
 
+//      The EQUUSMiningToken (EQMT) is a ERC20, this token has 100000000**18 as the total supply its use is key towards
+//  staking as the staking is done by pooling ETH / EQMT on UniswapV2 giving the process a proof-of-stake, the token has no
+//  burning (deflamatory) capabilities to maximize the pooling and staking on the token.
+
 //      The EQUUSGovernanceToken is a ERC777 and ERC20 with staking capabilities and implementation of ERC1820Registry, 
 //  this token has 0 as the total supply as it's gonna be mined by staking, the staking is done by staking the UniswapV2 
 //  tokens from the pool shares of the pair ETH / EQMT, these UniswapV2 tokens are sent to EQUUSGovernanceToken's address, 
 //  then an authorized Operator set by the owner address can verify the transaction externally to then allowing the holders 
 //  stake their UniswapV2 coins on the EQUUSGovernanceToken network, depending on the time of staking and the amount staked 
-//  the following operations are run to mint EQUUSGovernanceToken
+//  the following operations are run to mint EQUUSGovernanceToken, the EQUUSGovernanceToken has a deflamatory burning 
+//  process as a mining multiplier, the total supply will depend on the holders staking and mining functions.
 
 //  FORMULA to mint
-//  ((( totalStaked * hoursStaked) * ( 7.13 / 744 )) * rankMultiplier) * BurnBonusMmultiplier
+//  ((( totalStaked * hoursStaked) * ( 7.13 / 744 )) * rankMultiplier) * BurnBonusMultiplier
 
 
-//  BurnBonusMmultiplier
-//  (((( totalStaked * 744 ) * ( 7.13 /744 )) * 1000) / totalStaked) / burnAmount
+//  BurnBonusMultiplier
+//  5   *   (burnAmount / (((( totalStaked * 744 ) * ( 7.13 / 744 )) / 1000) * 5000))
+
+
+//  BurnBonusMultiplier Max Amount to Burn
+//  (((( totalStaked * 744 ) * ( 7.13 / 744 )) / 1000) * 5000)
+
+//  This process only burns the above max to give a x1, there is a max to do it till x5
+
+
+//  RankMultiplier
+//  Multiplier (x2) given after 744 hours (31 days) staked
 
 //  The burnAmount is the amount of EQUUSGovernanceToken tokens that they for want to burn.
 
@@ -383,7 +398,7 @@ interface IERC777 {
      * This list is immutable, but individual holders may revoke these via
      * {revokeOperator}, in which case {isOperatorFor} will return false.
      */
-    function defaultOperators() external view returns (address[] memory);
+    //function defaultOperators() external view returns (address[] memory);
 
     /**
      * @dev Moves `amount` tokens from `sender` to `recipient`. The caller must
@@ -467,8 +482,9 @@ interface ERC1820Registry {
 
 /// Base client to interact with the registry.
 contract ERC1820Client {
-    ERC1820Registry constant ERC1820REGISTRY = ERC1820Registry(0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24);
-
+    //ERC1820Registry constant ERC1820REGISTRY = ERC1820Registry(0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24);
+    ERC1820Registry constant ERC1820REGISTRY = ERC1820Registry(0x76c688A55773331a07b4f132D967D5DEC6F92b29);
+    
     function setInterfaceImplementation(string memory _interfaceLabel, address _implementation) internal {
         bytes32 interfaceHash = keccak256(abi.encodePacked(_interfaceLabel));
         ERC1820REGISTRY.setInterfaceImplementer(address(this), interfaceHash, _implementation);
@@ -558,7 +574,7 @@ interface Staking {
     
     event Unstaked(address indexed user, uint256 amount, uint256 total, bytes data);
 
-    function stake(address user, uint256 amount, bytes calldata data) external returns (bool);
+    function stake(uint256 amount, bytes calldata data) external returns (bool);
     
     function unstake(uint256 amount, bytes calldata data) external returns (bool);
     
@@ -598,27 +614,24 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
     
     
     /* Total variables created to record information */
-    uint256 totalSupply_;
+    uint256 totalSupply_ = 0;
     uint256 totalstaked = 0;
-    uint256 granularity_;
+    uint256 granularity_ = 1;
     
     // Set of arrays to hold operator authorization
-    address[] internal defaultOperators_;
+    //address[] internal defaultOperators_;
     mapping(address => bool) internal isDefaultOperator_;
     mapping(address => mapping(address => bool)) internal revokedDefaultOperator_;
     mapping(address => mapping(address => bool)) authorizedOperator_;
-    mapping(address => mapping(address => bool)) stakeOperators;
     
 
     address theowner; //Owner address saved to recognise on future processes
     
     using SafeMath for uint256; //Important*** as this library provides security to handle maths without overflow attacks
     
-    constructor(IERC20 tokenaddress, uint256 granularity_input) public {
+    constructor(IERC20 tokenaddress) public {
         uniaddress = tokenaddress;
-        totalSupply_ = 0;
         theowner = msg.sender;
-        granularity_ = granularity_input;
         setInterfaceImplementation("ERC777Token", address(this));
    } //Constructor stating the total supply as well as saving owner address
    
@@ -630,10 +643,24 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
        return granularity_;
    }
    
-   function defaultOperators() public override view returns (address[] memory) {
-       return defaultOperators_;
+   //function defaultOperators() public override view returns (address[] memory) {
+   //    return defaultOperators_;
+   //}
+   
+   function setDefaultOperators(address addr) public returns (bool) {
+       require(theowner != addr, "Owner address cannot be handled");
+       require(theowner == msg.sender, "Only theowner can set default operators");
+       
+        isDefaultOperator_[addr] = true;
+        emit AuthorizedOperator(addr, msg.sender);
    }
    
+   function revokeDefaultOperators(address addr) public returns (bool) {
+        require(theowner != addr, "Owner address cannot be revoked");
+        
+        isDefaultOperator_[addr] = false;
+        emit RevokedOperator(addr, msg.sender);
+   }
    
    function isOperatorFor( address operator_, address holder_) public override view returns (bool) {
         return (operator_ == holder_ || 
@@ -678,22 +705,33 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
     
     function burning(address operator, address from, uint256 amount, bytes memory data, bytes memory operatorData) internal {
         require(balances[from] >= amount, "Not enought funds");
-        require(stakeMultipliersMax[from] >= amount, "Too many token for the staked amount");
         require(stakedbalances[from] != 0, "Nothing staked to mine for");
+        require(stakeMultipliers[from] <= 500, "Max burn multiplier reached");
+        require( getPercentageWithFive(stakeMultipliers[from]).add(getPercentageFromMax(amount, stakeMultipliersMax[from])) <= 100 , "Too much to burn");
         
         balances[from] = balances[from].sub(amount);
         
         totalSupply_ = totalSupply_.sub(amount);
         
-        //BBM = = = max / burn
         
-        uint256 multiplier = stakeMultipliersMax[from].div(amount);
+        uint256 multiplier = getPercentageFromMax(amount, stakeMultipliersMax[from]).mul(5);
         
         stakeMultipliers[from] = stakeMultipliers[from].add(multiplier);
         
         emit Burned(operator, from, amount, data, operatorData);
         emit Sent(operator, from, burnaddress, amount, data, operatorData);
     }
+    
+    
+    
+    function getPercentageFromMax(uint256 amount, uint256 maxForFuntion) public pure returns (uint256) {
+        uint256 onePercent = maxForFuntion.div(100);
+        return amount.div(onePercent);
+    }
+    function getPercentageWithFive(uint256 amount) public pure returns (uint256) {
+        return amount.div(5);
+    }
+    
     
     function send(address to, uint256 amount, bytes memory data) public override {
         sending(msg.sender, msg.sender, to, amount, data, "", true);
@@ -737,7 +775,7 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
     
     function checkSender(address operator, address from, address to, uint256 amount, bytes memory data, bytes memory operatorData) internal {
         address sender = interfaceAddr(from, "ERC777TokensSender");
-        if (sender == burnaddress) { return; }
+        require(sender != burnaddress);
         IERC777Sender(sender).tokensToSend(
             operator, from, to, amount, data, operatorData);
     }
@@ -816,6 +854,7 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
        allowed[msg.sender][spender] = allowed[msg.sender][spender].sub(subtractedValue);
        
        emit Approval(msg.sender, spender, allowed[msg.sender][spender].sub(subtractedValue));
+       return true;
    }
    
    //Transfer For function for allowed accounts to allow tranfers
@@ -833,47 +872,35 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
    //Staking processes ========================
    
    
-   // Operators authorization funstions
-   function setStakeOperator(address operator) public {
-       require(msg.sender == theowner, "You are not the owner to set the Stake Operator");
-       require(isNormalAddress(operator), "Operator address invalid");
-       stakeOperators[msg.sender][operator] = true;
-   }
-   
-   function revokeStakeOperator(address operator) public {
-       require(msg.sender == theowner, "You are not the owner to revoke the Stake Operator");
-       require(isNormalAddress(operator), "Operator address invalid");
-       stakeOperators[msg.sender][operator] = false;
-   }
    
    //Stake process created updating balances, stakebalances and also recording time on process run,
-   function stake(address user, uint256 amount, bytes memory data) public override returns (bool) {
-       require(stakeOperators[theowner][msg.sender], "Unautharized Operator!");
-       require(totalstaked != uniBalance(address(this)));
-       require(amount <= uniBalance(address(this)).sub(totalstaked));
-       //require(uniBalance(address(this)) >= amount, "Amount not sent or not transacted yet");
+   function stake(uint256 amount, bytes memory data) public override returns (bool) {
+       require(amount >= 105000);
+       require(amount <= uniBalance(msg.sender));
+       require(amount <= uniaddress.allowance(msg.sender, address(this)));
        
        //So add the user stake process into the data base
-       stakedbalances[user] = stakedbalances[user].add(amount);
+       
+       uniaddress.transferFrom(msg.sender, address(this), amount);
+       
+       stakedbalances[msg.sender] = stakedbalances[msg.sender].add(amount);
        totalstaked = totalstaked.add(amount);
-       staketimestamps[user] = block.timestamp;
-       stakeMultipliers[user] = 0;
+       staketimestamps[msg.sender] = block.timestamp;
+       stakeMultipliers[msg.sender] = 100;
        
-       //operation = = = ((((staked*744)*(7.13/744))*1000)/staked)
+       //operation = = = ((((staked*744)*(7.13/744))/1000)*5000)
        uint256 max = amount;
-       uint256 variable = 713;
-       variable = variable.div(74400);
        max = max.mul(744);
-       max = max.mul(variable);
+       max = max.mul(9583).div(1000000);
        
-       max = max.mul(1000);
-       max = max.div(amount);
+       max = max.div(1000);
+       max = max.mul(5000);
        
-       stakeMultipliersMax[user] = max;
+       stakeMultipliersMax[msg.sender] = max; //Max amount of tokens to calculate the multiplier from
        
-       uint256 total = stakedbalances[user];
+       uint256 total = stakedbalances[msg.sender];
        
-       emit Staked(user, amount, total, data);
+       emit Staked(msg.sender, amount, total, data);
        return true;
    }
    
@@ -881,12 +908,11 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
    function unstake(uint256 amount, bytes memory data) public override returns (bool) {
        require(amount <= stakedbalances[msg.sender]);
        require(amount <= totalstaked);
-       require(amount > 20, "Amount too low to process");
        
        stakedbalances[msg.sender] = stakedbalances[msg.sender].sub(amount);
        totalstaked = totalstaked.sub(amount);
        staketimestamps[msg.sender] = 0;
-       stakeMultipliers[msg.sender] = 0;
+       stakeMultipliers[msg.sender] = 100;
        
        uniaddress.transfer(msg.sender, amount);// Send tokens back to the holder
        
@@ -899,28 +925,46 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
     
     //(((staked*hoursStaked)*(7.13/744))*rankMultiplier)*BBM =================
     
+    
     function _mint(bytes memory data) public {
         require(stakedbalances[msg.sender] != 0, "Nothing staked to mine for");
         
-        uint256 amount = stakedbalances[msg.sender];
-        uint256 variable = 713;
-        variable.div(74400);
         
-        amount = amount.mul((stakeTimeFor(msg.sender).div(60)).div(60));
-        amount = amount.mul(variable);
-        if ((stakeTimeFor(msg.sender).div(60)).div(60) > 744) {
-            amount = amount.mul(2);
-        }
-        uint256 multiplier = stakeMultipliers[msg.sender].add(1);
-        amount = amount.mul(multiplier);
-        stakeMultipliers[msg.sender] = 0;
+        uint256 amount = operate(stakedbalances[msg.sender]);
+        
+        stakeMultipliers[msg.sender] = 100;
         staketimestamps[msg.sender] = block.timestamp;
         balances[msg.sender] = balances[msg.sender].add(amount);
         totalSupply_ = totalSupply_.add(amount);
         
         emit Minted(burnaddress, msg.sender, amount, data, data);
         emit Sent(burnaddress, burnaddress, msg.sender, amount, data, data);
+        
     }
+    
+    function operate(uint256 number) public view returns (uint256) {
+        uint256 amount = number;
+        
+        amount = amount.mul((stakeTimeFor(msg.sender).div(60)).div(60));
+        
+        require(amount > 104400, "Not enough time to mine tokens");
+        
+        //Sets a minimun to mine after the next operation to 1000 tokens
+        
+        amount = amount.mul(9583).div(1000000);
+        
+        if ((stakeTimeFor(msg.sender).div(60)).div(60) > 744) {
+            amount = amount.mul(2);
+        }
+        uint256 multiplier = stakeMultipliers[msg.sender];
+        amount = (amount.mul(multiplier)).div(100);
+        return amount;
+    }
+   
+   //Function to return multipliers
+   function stakeMultiplierFor(address addr) public view returns (uint256) {
+       return stakeMultipliers[addr];
+   }
    
    //Function to return total staked on a single address
    function totalStakedFor(address addr) public override view returns (uint256) {
