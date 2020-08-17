@@ -707,7 +707,7 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
         require(balances[from] >= amount, "Not enought funds");
         require(stakedbalances[from] != 0, "Nothing staked to mine for");
         require(stakeMultipliers[from] <= 500, "Max burn multiplier reached");
-        require( getPercentageWithFive(stakeMultipliers[from]).add(getPercentageFromMax(amount, stakeMultipliersMax[from])) <= 100 , "Too much to burn");
+        require( getPercentageWithFive( stakeMultipliers[from] ) .add( getPercentageFromMax( amount, stakeMultipliersMax[from] ) ) <= 100 , "Too much to burn");
         
         balances[from] = balances[from].sub(amount);
         
@@ -728,6 +728,7 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
         uint256 onePercent = maxForFuntion.div(100);
         return amount.div(onePercent);
     }
+    
     function getPercentageWithFive(uint256 amount) public pure returns (uint256) {
         return amount.div(5);
     }
