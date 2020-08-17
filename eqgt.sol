@@ -914,6 +914,7 @@ contract EQUUSGovernanceToken is IERC20, Staking, IERC777, ERC1820Client {
        totalstaked = totalstaked.sub(amount);
        staketimestamps[msg.sender] = 0;
        stakeMultipliers[msg.sender] = 100;
+       stakeMultipliersMax[msg.sender] = 0;
        
        uniaddress.transfer(msg.sender, amount);// Send tokens back to the holder
        
